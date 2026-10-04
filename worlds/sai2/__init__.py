@@ -1,5 +1,7 @@
-from BaseClasses import Item, ItemClassification, Location, Region
+from BaseClasses import Item, Location, Region
 from worlds.AutoWorld import World, WebWorld
+
+from .Items import SAI2ItemData, item_name_to_id, item_table
 
 
 class SAI2WebWorld(WebWorld):
@@ -23,7 +25,7 @@ class SAI2World(World):
 
     web = SAI2WebWorld()
 
-    item_name_to_id = {}
+    item_name_to_id = item_name_to_id
     location_name_to_id = {}
 
     def create_regions(self) -> None:
@@ -40,9 +42,11 @@ class SAI2World(World):
         pass
 
     def create_item(self, name: str) -> SAI2Item:
+        data: SAI2ItemData = item_table[name]
+
         return SAI2Item(
             name,
-            ItemClassification.filler,
-            self.item_name_to_id[name],
+            data.classification,
+            data.code,
             self.player,
         )
