@@ -2,7 +2,8 @@ from BaseClasses import Item, Location, Region
 from worlds.AutoWorld import World, WebWorld
 
 from .Items import SAI2ItemData, item_name_to_id, item_table
-
+from .Locations import location_name_to_id, location_table
+from .Regions import create_regions
 
 class SAI2WebWorld(WebWorld):
     theme = "grass"
@@ -26,11 +27,11 @@ class SAI2World(World):
     web = SAI2WebWorld()
 
     item_name_to_id = item_name_to_id
-    location_name_to_id = {}
+    location_name_to_id = location_name_to_id
+    
 
     def create_regions(self) -> None:
-        menu = Region("Menu", self.player, self.multiworld)
-        self.multiworld.regions.append(menu)
+        create_regions(self)
 
     def create_items(self) -> None:
         pass
