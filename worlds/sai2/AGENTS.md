@@ -11,12 +11,8 @@ See `docs/index.md` for full developer documentation.
 
 ## Tests
 
-```
-.\.venv\Scripts\python.exe -m unittest discover -s worlds/sai2/test -t . -v
-```
-
-`test/test_rom.py` performs real fills and ROM generation in a temp directory; it can print
-verbose `[SAI2]` output. `test/test_client.py` is offline (fake BizHawk memory).
+The `test/` unit suite was removed from the tree (restore it with
+`git checkout bc9af6e4 -- worlds/sai2/test`).
 
 Fill reliability (should report 0 failures solo):
 

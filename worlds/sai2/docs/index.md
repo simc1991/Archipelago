@@ -386,23 +386,21 @@ target area is free (`0xFF`).
 
 ## 13. Testing
 
-Run the tests from the Archipelago root with the project venv:
+The unit test suite (`test/`) was removed from the tree to keep the fork lean; it is still
+reachable in git history (commit `bc9af6e4`) and can be restored with:
 
 ```
-.\.venv\Scripts\python.exe -m unittest discover -s worlds/sai2/test -t . -v
+git checkout bc9af6e4 -- worlds/sai2/test
 ```
 
-- `test/test_rom.py`: generates a seed, patches the ROM, and checks that:
-  - the `1000 COINS` message is vanilla and the "??? coins" hook is not installed;
-  - every local standard chest contains the item that AP placed there;
-  - remote locations get a sink item / message code, and `SAI2AP03` is written.
-- `test/test_client.py`: drives the client's goal detection and the receive mailbox with a fake
-  BizHawk memory (queueing, busy wait, saved counter, unsupported items).
-- `test/test_fill.py`: checks that 100 solo seeds all fill and are fully accessible, that events
-  hold no common rewards, and that the repeatable rewards have exactly one progression copy.
-- `test/test_multiworld.py`: message encoders, remote chest/event patching, and a real
-  two-player SAI2 × ChecksFinder generation.
-- `tools/fill_stress.py`: run at least 50 seeds after changing logic or fill rules.
+What remains:
+
+- `tools/fill_stress.py`: generates many seeds and reports fill failures —
+  run at least 50 seeds after changing logic or fill rules:
+
+```
+.\.venv\Scripts\python.exe worlds\sai2\tools\fill_stress.py 200
+```
 
 To test in game without playing the whole game, use `tools/sai2_debug.lua` in BizHawk:
 
