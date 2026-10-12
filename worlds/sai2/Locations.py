@@ -28,7 +28,8 @@ location_table: dict[str, SAI2LocationData] = {
     "Boa - Sun Stone": SAI2LocationData(BASE_LOCATION_ID + 21, 0x1A961),
     "Hiya - Star Stone": SAI2LocationData(BASE_LOCATION_ID + 22, 0x116EC),
     "Puka - Aqua Stone": SAI2LocationData(BASE_LOCATION_ID + 23, 0x16D70),
-    "Sala - Moon Stone": SAI2LocationData(BASE_LOCATION_ID + 24, 0x17A91),
+    "Puka - Power Fan": SAI2LocationData(BASE_LOCATION_ID + 67,0x1A9D9),
+    "Puka Isle - Moon Stone": SAI2LocationData(BASE_LOCATION_ID + 24, 0x17A91),
     "Sala - Elven Flute": SAI2LocationData(BASE_LOCATION_ID + 25, 0x14159),
     "Fuwa - Sky Bell": SAI2LocationData(BASE_LOCATION_ID + 26, 0x14C5C),
 

@@ -243,3 +243,115 @@ item_name_to_id = {
     name: data.code
     for name, data in item_table.items()
 }
+
+# Vanilla item pool.
+#
+# 68 total entries; __init__.py removes the 3 vanilla techniques, leaving 65 randomized items.
+# Repeated entries represent repeatable rewards such as
+# Life Bottles, Magic refills and coin rewards.
+
+item_pool = [
+    # ---------------------------------------------------------
+    # Poka / Poka Isle
+    # ---------------------------------------------------------
+    "Light Stone",
+    "Power Fan",
+    "Life Bottle",
+    "Dagger",
+    "Life Bottle",
+    "500 Coins",
+    "Ice Sword",
+    "1000 Coins",
+    "Silver Sword",
+    "2000 Coins",
+    "Fireballs",
+    "Light Spell",
+
+    # ---------------------------------------------------------
+    # Boa / Boa Isle
+    # ---------------------------------------------------------
+    "Sun Stone",
+
+    "Aqua Stone",
+    "Ice Shield",
+    "Magic",
+    "Magic",
+    "1000 Coins",
+    "Ice Armor",
+    "2000 Coins",
+    "Magic",
+    "Sun Spell",
+
+    # ---------------------------------------------------------
+    # Hiya / Hiya Isle
+    # ---------------------------------------------------------
+    "Star Stone",
+    "Shove",
+
+    "Fire Sword",
+    "Magic",
+    "Life Bottle",
+    "Fire Shield",
+    "Life Bottle",
+    "Life Bottle",
+    "Fire Armor",
+    "1000 Coins",
+    "Life Bottle",
+    "Star Spell",
+
+    # ---------------------------------------------------------
+    # Puka / Puka Isle
+    # ---------------------------------------------------------
+    "Down Jab",
+
+    "Moon Stone",
+    "500 Coins",
+    "Magic",
+    "1000 Coins",
+    "Magic",
+    "Magic",
+    "Life Bottle",
+    "1000 Coins",
+    "Magic",
+    "Aqua Armor",
+    "Thunder Sword",
+    "Aqua Spell",
+
+    # ---------------------------------------------------------
+    # Sala / Sala Isle
+    # ---------------------------------------------------------
+    "Up Jab",
+
+    "Elven Flute",
+    "Life Bottle",
+    "2000 Coins",
+    "Magic",
+    "Crystal Sword",
+    "Aqua Shield",
+    "Magic",
+    "Magic",
+    "Axe",
+    "Moon Spell",
+
+    # ---------------------------------------------------------
+    # Star Zone
+    # ---------------------------------------------------------
+    "Sun Ring",
+    "Magic Wand",
+
+    # ---------------------------------------------------------
+    # Overworld
+    # ---------------------------------------------------------
+    "Ice Bell",
+    "Shovel",
+
+    # ---------------------------------------------------------
+    # Fuwa Isle
+    # ---------------------------------------------------------
+    "Sky Bell",
+    "Life Bottle",
+    "5000 Coins",
+    "Magic",
+    "Magic",
+    "Power Sword",
+]
