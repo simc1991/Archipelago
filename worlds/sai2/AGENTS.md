@@ -76,5 +76,10 @@ It also logs every change to `$D3` and `$10`.
 - Remote chests get sink item `$1C10 + k` (message `YOU SENT / <item> / TO <player>`), remote
   events get message code `$40 + k` via `patch_event_check_flag`. Never write a cross-game item
   id to SAI2 item memory.
+- Two transports share `SAI2ClientLogic` in `client.py`: BizHawk
+  (`SuperAdventureIslandIIClient`) and SNI (`SuperAdventureIslandIISNIClient`, v15.1).
+  SNI addressing: WRAM `$7E:xxxx` → `$F5xxxx`, ROM by file offset. Only the read/write
+  primitives differ — mailbox/check/victory logic is identical. `validate_rom` is called
+  every tick on SNI: keep it cheap and idempotent.
 - The v14 backups were removed from the tree; the frozen v14.2 code is still
   reachable in git history (commit `bc9af6e4`).

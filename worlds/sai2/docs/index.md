@@ -1,7 +1,7 @@
 # Super Adventure Island II — Archipelago World: Developer Documentation
 
 This document covers the `worlds/sai2` package. It explains how the world is built,
-how the ROM gets patched, and how the BizHawk client talks to the game.
+how the ROM gets patched, and how the clients (BizHawk and SNI) talk to the game.
 
 - Game: *Super Adventure Island II* (SNES, USA, unheadered, HiROM, 1.5 MiB)
 - Base ROM SHA‑1: `06776efd3cc3997513f90fbe2507939a1c61bb87`
@@ -20,7 +20,7 @@ how the ROM gets patched, and how the BizHawk client talks to the game.
 6. [Logic (`Rules.py`)](#6-logic-rulespy)
 7. [ROM patching (`Rom.py` + `generate_output`)](#7-rom-patching)
 8. [Embedded AP check table](#8-embedded-ap-check-table)
-9. [BizHawk client (`client.py`)](#9-bizhawk-client-clientpy)
+9. [Game clients (`client.py`)](#9-game-clients-clientpy)
 10. [Multiworld (v15): AP item, receive mailbox](#10-multiworld-v15)
 11. [Memory map (WRAM / ROM)](#11-memory-map)
 12. [Tools (`tools/`)](#12-tools)
@@ -40,7 +40,7 @@ how the ROM gets patched, and how the BizHawk client talks to the game.
 | `Regions.py` | Region list, location-to-region assignment, region connections. |
 | `Rules.py` | Access rules. Ported from sai2_rando's `requirements.txt`. |
 | `Rom.py` | Low-level ROM helpers: validation, chest/event patching, memory pools, constant tables. |
-| `client.py` | `SuperAdventureIslandIIClient` (BizHawk): reads the check table, sends checks, queues received items. |
+| `client.py` | `SAI2ClientLogic` + two transports: `SuperAdventureIslandIIClient` (BizHawk) and `SuperAdventureIslandIISNIClient` (SNI). Reads the check table, sends checks, queues received items. |
 | `Multiworld.py` | v15 ROM patch: AP item hooks (65816 code), message encoder, receive mailbox constants. |
 | `data/ap_logo.bin`, `data/ap_logo_palette.bin` | AP logo sprite (4bpp) + palette, built by `tools/make_ap_logo.py` from `data/icon.png`. |
 | `tools/` | Standalone research and debug scripts (see [§12](#12-tools)). |
@@ -224,9 +224,15 @@ N × 8 bytes:
 
 The client uses the signature to recognize the ROM.
 
-## 9. BizHawk client (`client.py`)
+## 9. Game clients (`client.py`)
 
-`SuperAdventureIslandIIClient(BizHawkClient)`, `system = "SNES"`.
+`SAI2ClientLogic` holds all the game logic; two transports implement the memory primitives:
+
+- `SuperAdventureIslandIIClient(BizHawkClient)`, `system = "SNES"` — BizHawk via
+  `connector_bizhawk_generic.lua` + BizHawkClient.
+- `SuperAdventureIslandIISNIClient(SNIClient)` (v15.1) — SNI via its own `Connector.lua`
+  (BizHawk/snes9x-nwa/RetroArch) or real hardware. WRAM `$7E:xxxx` → `$F5xxxx`, ROM read by
+  file offset; `ctx.rom` = the check table bytes (unique per seed).
 
 - **`validate_rom`**: reads the table header from the `ROM` domain. If the signature and count match,
   it loads `check_map` (memory id → location id) and `event_rewards`.
@@ -426,18 +432,28 @@ To test in game without playing the whole game, use `tools/sai2_debug.lua` in Bi
   seed if that happens.
 - No options and no WebWorld docs yet.
 
-### v15.1
+### v15.1 (done)
 
-- **SNI client** (`SAI2SNIClient(SNIClient)`): same protocol as the BizHawk client, but over SNI —
-  which would add snes9x-nwa / RetroArch / **real hardware (FXPakPro/SD2SNES)** support.
-  Nothing game-side blocks it; it is a client port:
-  - ROM validation reads `SAI2AP03` at SNES address `$D7:B300` (file `0x17B300`) instead of the
-    `ROM` domain.
-  - WRAM reads/writes go through `sni.read/write(0x7E0000 + addr)` — mailbox, check flags,
-    `RECEIVED_COUNT`, victory bytes all work on hardware too.
-  - The mailbox/counter protocol is unchanged; the game-side hooks are emulator-agnostic.
+- **SNI client** (`SuperAdventureIslandIISNIClient` in `client.py`): the BizHawk-only logic was
+  split into `SAI2ClientLogic` (shared: check table, mailbox, checks, victory) plus two thin
+  transports. SNI uses FXpak addressing — WRAM `$7E:xxxx` → `$F5xxxx`, ROM read by file offset —
+  so it works on snes9x-nwa, RetroArch, BizHawk via SNI's own `Connector.lua`, and real hardware
+  (FXPakPro/SD2SNES).
+  - `ctx.rom` (auth identity) = the embedded check table bytes, unique per seed.
+  - `validate_rom` is idempotent and cheap (SNI calls it every tick).
+  - Check flags are read as one WRAM span chunked at `SNES_READ_CHUNK_SIZE` (2048) instead of
+    68 separate reads.
+  - Run it with `SNIClient.py` (SNI must be running; BizHawk needs the **SNI** `Connector.lua`,
+    not the Archipelago one).
 
 ## 15. Changelog
+
+### v15.1
+- **SNI transport.** `client.py` split into `SAI2ClientLogic` + BizHawk and SNI transports, so
+  SAI2 can be played through SNI (snes9x-nwa, RetroArch, BizHawk+SNI Connector.lua, FXPakPro).
+- `.apworld` packaging support: `archipelago.json` manifest, `data/` assets read via
+  `pkgutil.get_data`.
+- AP held-item pose `$14` → `$11`: the logo is now 16×16 in the hand instead of 32×32.
 
 ### v15.0
 - **Multiworld items.** Chests and events holding another player's item show `YOU SENT / <item> /

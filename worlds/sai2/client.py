@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from NetUtils import ClientStatus
 import worlds._bizhawk as bizhawk
 from worlds._bizhawk.client import BizHawkClient
+from worlds.AutoSNIClient import SNES_READ_CHUNK_SIZE, SNIClient
 
 from .Multiworld import (
     ITEM_NONE,
@@ -17,6 +18,7 @@ from .Multiworld import (
 )
 
 if TYPE_CHECKING:
+    from SNIClient import SNIContext
     from worlds._bizhawk.context import BizHawkClientContext
 
 logger = logging.getLogger("Client")
@@ -43,11 +45,39 @@ MODE_FINAL_BOSS = 0x06
 ENDING_VALUE = 0xB0
 ENDING_POLLS_REQUIRED = 7
 
+# SNI/FXPak address space (worlds.smw conventions): WRAM $7E:xxxx -> $F5xxxx,
+# ROM is read by plain file offset.
+SNI_WRAM_START = 0xF50000
 
-class SuperAdventureIslandIIClient(BizHawkClient):
-    game = "Super Adventure Island II"
-    system = "SNES"
-    patch_suffix = None
+
+class SAI2ClientLogic:
+    """Transport-agnostic SAI2 client logic.
+
+    The ROM does all the real work (mailbox item display, check flags,
+    event completion). The client only reads/writes WRAM and the embedded
+    AP table, so the BizHawk connector and SNI versions below share
+    everything except the memory access primitives.
+    """
+
+    # -- transport interface -------------------------------------------
+
+    async def read_rom(self, ctx, offset: int, size: int) -> bytes | None:
+        raise NotImplementedError
+
+    async def read_wram(self, ctx, offset: int, size: int) -> bytes | None:
+        raise NotImplementedError
+
+    async def write_wram(self, ctx, writes: list[tuple[int, bytes]]) -> bool:
+        raise NotImplementedError
+
+    async def read_wram_multi(self, ctx, reads: list[tuple[int, int]]) -> list[bytes] | None:
+        raise NotImplementedError
+
+    async def read_check_flags(self, ctx, memory_ids: list[int]) -> list[int] | None:
+        """Return the byte at each WRAM address in memory_ids (same order)."""
+        raise NotImplementedError
+
+    # -- shared state ----------------------------------------------------
 
     def __init__(self) -> None:
         super().__init__()
@@ -70,6 +100,12 @@ class SuperAdventureIslandIIClient(BizHawkClient):
         self.final_boss_seen = False
         self.ending_polls = 0
 
+    def reset_connection_state(self) -> None:
+        """Called when a (new) ROM is accepted."""
+        self.reported_checks = set()
+        self.awarded_events = set()
+        self.reset_goal_state()
+
     def update_goal(self, game_mode: int, ending_value: int) -> bool:
         """Advance the RetroAchievements-style victory state machine. Return True once reached."""
         if game_mode == MODE_TITLE:
@@ -85,13 +121,11 @@ class SuperAdventureIslandIIClient(BizHawkClient):
             and self.ending_polls >= ENDING_POLLS_REQUIRED
         )
 
-    async def _read_check_table(self, ctx: "BizHawkClientContext") -> dict[int, int] | None:
-        header = (await bizhawk.read(
-            ctx.bizhawk_ctx,
-            [(AP_TABLE_OFFSET, AP_TABLE_HEADER_SIZE, "ROM")],
-        ))[0]
+    # -- shared protocol -------------------------------------------------
 
-        if header[:8] != AP_TABLE_SIGNATURE:
+    async def _read_check_table(self, ctx) -> dict[int, int] | None:
+        header = await self.read_rom(ctx, AP_TABLE_OFFSET, AP_TABLE_HEADER_SIZE)
+        if header is None or header[:8] != AP_TABLE_SIGNATURE:
             return None
 
         count = int.from_bytes(header[8:10], "little")
@@ -99,10 +133,9 @@ class SuperAdventureIslandIIClient(BizHawkClient):
             logger.error(f"[SAI2] Invalid AP check table count: {count}, expected {EXPECTED_CHECK_COUNT}")
             return None
 
-        raw = (await bizhawk.read(
-            ctx.bizhawk_ctx,
-            [(AP_TABLE_OFFSET + AP_TABLE_HEADER_SIZE, count * AP_TABLE_ENTRY_SIZE, "ROM")],
-        ))[0]
+        raw = await self.read_rom(ctx, AP_TABLE_OFFSET + AP_TABLE_HEADER_SIZE, count * AP_TABLE_ENTRY_SIZE)
+        if raw is None:
+            return None
 
         check_map: dict[int, int] = {}
         event_rewards: dict[int, int] = {}
@@ -122,20 +155,164 @@ class SuperAdventureIslandIIClient(BizHawkClient):
             check_map[memory_id] = location_id
 
         self.event_rewards = event_rewards
+        # Seed-unique identity, used as the SNI auth token (ctx.rom).
+        self.table_identity = header + raw
         return check_map
 
-    async def validate_rom(self, ctx: "BizHawkClientContext") -> bool:
+    async def _watcher_body(self, ctx) -> None:
+        if not self.check_map:
+            return
+
+        # -------------------------------------------------
+        # Receive AP items (v15 mailbox).
+        # RECEIVED_COUNT lives in the saved WRAM block, so it is the
+        # truth for "how many items this save file already got". When
+        # the mailbox is idle, queue the next one; the ROM gives it and
+        # plays the AP item animation once the player can act.
+        # -------------------------------------------------
+        reads = await self.read_wram_multi(
+            ctx, [(MAILBOX_STATE, 2), (RECEIVED_COUNT, 2)]
+        )
+        if reads is None:
+            return
+        mailbox_state = int.from_bytes(reads[0], "little")
+        applied = int.from_bytes(reads[1], "little")
+
+        if mailbox_state == 0 and applied < len(ctx.items_received):
+            network_item = ctx.items_received[applied]
+            try:
+                item_name = ctx.item_names.lookup_in_game(network_item.item)
+            except Exception:
+                item_name = str(network_item.item)
+            sender = ctx.player_names.get(network_item.player, "Archipelago")
+            value = self.mailbox_item_value(item_name)
+            if value == ITEM_NONE:
+                logger.warning(f"[SAI2] RECEIVE UNSUPPORTED: {item_name} (shown, not given)")
+
+            if not await self.write_wram(ctx, [
+                (MAILBOX_ITEM, value.to_bytes(2, "little")),
+                (MAILBOX_MESSAGE, received_message(item_name, sender)),
+                (MAILBOX_STATE, (1).to_bytes(2, "little")),
+            ]):
+                return
+            logger.info(f"[SAI2] ITEM QUEUED #{applied + 1}: {item_name} from {sender}")
+
+        # -------------------------------------------------
+        # Send location checks.
+        # -------------------------------------------------
+        memory_ids = sorted(self.check_map)
+        values = await self.read_check_flags(ctx, memory_ids)
+        if values is None:
+            return
+
+        checked_location_ids = {
+            self.check_map[memory_id]
+            for memory_id, value in zip(memory_ids, values)
+            if value != 0
+        }
+
+        # Event scripts now write only the physical completion flag.
+        # Award the local event reward separately; remote events have no reward.
+        for memory_id, reward_id in self.event_rewards.items():
+            if memory_id in self.awarded_events:
+                continue
+            if self.check_map[memory_id] not in checked_location_ids:
+                continue
+            if 0x044E <= reward_id <= 0x047F:
+                if not await self.write_wram(ctx, [(reward_id, b"\x01")]):
+                    return
+                logger.info(f"[SAI2] EVENT LOCAL REWARD: 0x{reward_id:04X}")
+            else:
+                logger.error(f"[SAI2] Unsupported event local reward 0x{reward_id:04X}")
+            self.awarded_events.add(memory_id)
+
+        ctx.locations_checked.update(checked_location_ids)
+
+        # -------------------------------------------------
+        # Victory.
+        # -------------------------------------------------
+        if not ctx.finished_game:
+            goal_reads = await self.read_wram_multi(
+                ctx,
+                [(GAME_MODE_ADDR, 1), (ENDING_ADDR, 1), (GOAL_DEBUG_FLAG_ADDR, 1)],
+            )
+            if goal_reads is None:
+                return
+            if goal_reads[2][0] == 0x01 or self.update_goal(goal_reads[0][0], goal_reads[1][0]):
+                await ctx.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
+                ctx.finished_game = True
+                logger.info("[SAI2] VICTORY: goal sent to the server.")
+
+        new_checks = checked_location_ids - self.reported_checks
+        if not new_checks:
+            return
+
+        sent = await ctx.check_locations(new_checks)
+
+        if sent:
+            self.reported_checks.update(sent)
+
+            for location_id in sorted(sent):
+                try:
+                    location_name = ctx.location_names.lookup_in_game(location_id)
+                except Exception:
+                    location_name = str(location_id)
+
+                logger.info(f"[SAI2] CHECK SENT: {location_name} ({location_id})")
+
+
+class SuperAdventureIslandIIClient(SAI2ClientLogic, BizHawkClient):
+    """BizHawk transport (connector_bizhawk_generic.lua)."""
+
+    game = "Super Adventure Island II"
+    system = "SNES"
+    patch_suffix = None
+
+    async def read_rom(self, ctx: "BizHawkClientContext", offset: int, size: int) -> bytes | None:
         try:
-            check_map = await self._read_check_table(ctx)
-            if check_map is None:
-                return False
+            return (await bizhawk.read(ctx.bizhawk_ctx, [(offset, size, "ROM")]))[0]
+        except (bizhawk.RequestFailedError, bizhawk.ConnectorError, bizhawk.SyncError):
+            return None
+
+    async def read_wram(self, ctx: "BizHawkClientContext", offset: int, size: int) -> bytes | None:
+        try:
+            return (await bizhawk.read(ctx.bizhawk_ctx, [(offset, size, "WRAM")]))[0]
+        except (bizhawk.RequestFailedError, bizhawk.ConnectorError, bizhawk.SyncError):
+            return None
+
+    async def write_wram(self, ctx: "BizHawkClientContext", writes: list[tuple[int, bytes]]) -> bool:
+        try:
+            await bizhawk.write(ctx.bizhawk_ctx, [(a, d, "WRAM") for a, d in writes])
+            return True
         except (bizhawk.RequestFailedError, bizhawk.ConnectorError, bizhawk.SyncError):
             return False
 
+    async def read_wram_multi(
+        self, ctx: "BizHawkClientContext", reads: list[tuple[int, int]]
+    ) -> list[bytes] | None:
+        try:
+            return await bizhawk.read(ctx.bizhawk_ctx, [(a, s, "WRAM") for a, s in reads])
+        except (bizhawk.RequestFailedError, bizhawk.ConnectorError, bizhawk.SyncError):
+            return None
+
+    async def read_check_flags(
+        self, ctx: "BizHawkClientContext", memory_ids: list[int]
+    ) -> list[int] | None:
+        try:
+            values = await bizhawk.read(
+                ctx.bizhawk_ctx, [(memory_id, 1, "WRAM") for memory_id in memory_ids]
+            )
+            return [value[0] for value in values]
+        except (bizhawk.RequestFailedError, bizhawk.ConnectorError, bizhawk.SyncError):
+            return None
+
+    async def validate_rom(self, ctx: "BizHawkClientContext") -> bool:
+        check_map = await self._read_check_table(ctx)
+        if check_map is None:
+            return False
+
         self.check_map = check_map
-        self.reported_checks = set()
-        self.awarded_events = set()
-        self.reset_goal_state()
+        self.reset_connection_state()
 
         ctx.game = self.game
 
@@ -149,107 +326,75 @@ class SuperAdventureIslandIIClient(BizHawkClient):
         return True
 
     async def game_watcher(self, ctx: "BizHawkClientContext") -> None:
-        if not self.check_map:
-            return
+        await self._watcher_body(ctx)
 
-        try:
-            # -------------------------------------------------
-            # Receive AP items (v15 mailbox).
-            # RECEIVED_COUNT lives in the saved WRAM block, so it is the
-            # truth for "how many items this save file already got". When
-            # the mailbox is idle, queue the next one; the ROM gives it and
-            # plays the AP item animation once the player can act.
-            # -------------------------------------------------
-            state_raw, count_raw = await bizhawk.read(
-                ctx.bizhawk_ctx,
-                [(MAILBOX_STATE, 2, "WRAM"), (RECEIVED_COUNT, 2, "WRAM")],
-            )
-            mailbox_state = int.from_bytes(state_raw, "little")
-            applied = int.from_bytes(count_raw, "little")
 
-            if mailbox_state == 0 and applied < len(ctx.items_received):
-                network_item = ctx.items_received[applied]
-                try:
-                    item_name = ctx.item_names.lookup_in_game(network_item.item)
-                except Exception:
-                    item_name = str(network_item.item)
-                sender = ctx.player_names.get(network_item.player, "Archipelago")
-                value = self.mailbox_item_value(item_name)
-                if value == ITEM_NONE:
-                    logger.warning(f"[SAI2] RECEIVE UNSUPPORTED: {item_name} (shown, not given)")
+class SuperAdventureIslandIISNIClient(SAI2ClientLogic, SNIClient):
+    """SNI transport: snes9x-nwa, RetroArch, BizHawk via SNI's Connector.lua,
+    or real hardware (FXPakPro/SD2SNES). Same protocol as the BizHawk client.
+    """
 
-                await bizhawk.write(ctx.bizhawk_ctx, [
-                    (MAILBOX_ITEM, value.to_bytes(2, "little"), "WRAM"),
-                    (MAILBOX_MESSAGE, received_message(item_name, sender), "WRAM"),
-                    (MAILBOX_STATE, (1).to_bytes(2, "little"), "WRAM"),
-                ])
-                logger.info(f"[SAI2] ITEM QUEUED #{applied + 1}: {item_name} from {sender}")
+    game = "Super Adventure Island II"
 
-            # -------------------------------------------------
-            # Send location checks.
-            # -------------------------------------------------
-            memory_ids = sorted(self.check_map)
+    async def read_rom(self, ctx: "SNIContext", offset: int, size: int) -> bytes | None:
+        from SNIClient import snes_read
+        return await snes_read(ctx, offset, size)
 
-            values = await bizhawk.read(
-                ctx.bizhawk_ctx,
-                [(memory_id, 1, "WRAM") for memory_id in memory_ids],
-            )
+    async def read_wram(self, ctx: "SNIContext", offset: int, size: int) -> bytes | None:
+        from SNIClient import snes_read
+        return await snes_read(ctx, SNI_WRAM_START + offset, size)
 
-            checked_location_ids = {
-                self.check_map[memory_id]
-                for memory_id, value in zip(memory_ids, values)
-                if value and value[0] != 0
-            }
+    async def write_wram(self, ctx: "SNIContext", writes: list[tuple[int, bytes]]) -> bool:
+        from SNIClient import snes_write
+        return await snes_write(ctx, [(SNI_WRAM_START + a, d) for a, d in writes])
 
-            # Event scripts now write only the physical completion flag.
-            # Award the local event reward separately; remote events have no reward.
-            for memory_id, reward_id in self.event_rewards.items():
-                if memory_id in self.awarded_events:
-                    continue
-                if self.check_map[memory_id] not in checked_location_ids:
-                    continue
-                if 0x044E <= reward_id <= 0x047F:
-                    await bizhawk.write(ctx.bizhawk_ctx, [(reward_id, [1], "WRAM")])
-                    logger.info(f"[SAI2] EVENT LOCAL REWARD: 0x{reward_id:04X}")
-                else:
-                    logger.error(f"[SAI2] Unsupported event local reward 0x{reward_id:04X}")
-                self.awarded_events.add(memory_id)
+    async def read_wram_multi(
+        self, ctx: "SNIContext", reads: list[tuple[int, int]]
+    ) -> list[bytes] | None:
+        from SNIClient import snes_read
+        out: list[bytes] = []
+        for offset, size in reads:
+            data = await snes_read(ctx, SNI_WRAM_START + offset, size)
+            if data is None:
+                return None
+            out.append(data)
+        return out
 
-            ctx.locations_checked.update(checked_location_ids)
+    async def read_check_flags(
+        self, ctx: "SNIContext", memory_ids: list[int]
+    ) -> list[int] | None:
+        from SNIClient import snes_read
+        # One span read chunked at SNES_READ_CHUNK_SIZE beats 68 roundtrips.
+        lo, hi = min(memory_ids), max(memory_ids) + 1
+        buf = bytearray()
+        pos = lo
+        while pos < hi:
+            chunk = min(SNES_READ_CHUNK_SIZE, hi - pos)
+            data = await snes_read(ctx, SNI_WRAM_START + pos, chunk)
+            if data is None:
+                return None
+            buf += data
+            pos += chunk
+        return [buf[memory_id - lo] for memory_id in memory_ids]
 
-            # -------------------------------------------------
-            # Victory.
-            # -------------------------------------------------
-            if not ctx.finished_game:
-                game_mode, ending_value, goal_debug = await bizhawk.read(
-                    ctx.bizhawk_ctx,
-                    [
-                        (GAME_MODE_ADDR, 1, "WRAM"),
-                        (ENDING_ADDR, 1, "WRAM"),
-                        (GOAL_DEBUG_FLAG_ADDR, 1, "WRAM"),
-                    ],
-                )
-                if goal_debug[0] == 0x01 or self.update_goal(game_mode[0], ending_value[0]):
-                    await ctx.send_msgs([{"cmd": "StatusUpdate", "status": ClientStatus.CLIENT_GOAL}])
-                    ctx.finished_game = True
-                    logger.info("[SAI2] VICTORY: goal sent to the server.")
+    async def validate_rom(self, ctx: "SNIContext") -> bool:
+        # Runs every watcher tick on SNI: keep it cheap and idempotent.
+        check_map = await self._read_check_table(ctx)
+        if check_map is None:
+            return False
 
-            new_checks = checked_location_ids - self.reported_checks
-            if not new_checks:
-                return
+        # ctx.rom is the per-seed identity (auth token); the embedded check
+        # table is unique per generated ROM.
+        if self.check_map != check_map:
+            self.check_map = check_map
+            self.reset_connection_state()
+            logger.info(f"[SAI2] ROM recognized. Loaded {len(self.check_map)} seed-specific checks.")
 
-            sent = await ctx.check_locations(new_checks)
+        ctx.rom = self.table_identity
+        ctx.game = self.game
+        ctx.items_handling = 0b101
+        ctx.want_slot_data = False
+        return True
 
-            if sent:
-                self.reported_checks.update(sent)
-
-                for location_id in sorted(sent):
-                    try:
-                        location_name = ctx.location_names.lookup_in_game(location_id)
-                    except Exception:
-                        location_name = str(location_id)
-
-                    logger.info(f"[SAI2] CHECK SENT: {location_name} ({location_id})")
-
-        except (bizhawk.RequestFailedError, bizhawk.ConnectorError, bizhawk.SyncError):
-            return
+    async def game_watcher(self, ctx: "SNIContext") -> None:
+        await self._watcher_body(ctx)
