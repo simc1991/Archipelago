@@ -32,11 +32,11 @@ Archipelago installation. The world registers as *Super Adventure Island II*.
 Put one YAML per player in the `Players/` folder next to the Archipelago
 generate tool (same folder for source and release installs).
 
-`Simon.yaml`:
+`Me.yaml`:
 
 ```yaml
 description: SAI2 player
-name: Simon
+name: Me
 game: Super Adventure Island II
 Super Adventure Island II: {}
 ```
