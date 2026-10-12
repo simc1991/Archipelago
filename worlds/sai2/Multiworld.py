@@ -14,7 +14,7 @@ Reverse-engineering notes (vanilla addresses) are in docs/index.md, section
 """
 from __future__ import annotations
 
-from pathlib import Path
+import pkgutil
 
 # ---------------------------------------------------------------------------
 # Memory map
@@ -458,7 +458,12 @@ def build_code(origin: int) -> tuple[bytes, dict[str, int]]:
 # Patch application
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+def _data(name: str) -> bytes:
+    """Read worlds/sai2/data/<name>. pkgutil also works inside an .apworld zip."""
+    data = pkgutil.get_data("worlds.sai2", f"data/{name}")
+    if data is None:
+        raise FileNotFoundError(f"worlds/sai2/data/{name} is missing")
+    return data
 
 
 def _write(rom: bytearray, offset: int, data: bytes) -> None:
@@ -497,8 +502,8 @@ def apply_multiworld_patch(rom: bytearray) -> None:
     _write(rom, snes_to_file(0xC05C39), jsl("gfx_index") + b"\xEA" * 3)
     _write(rom, snes_to_file(0xC05DEA), jsl("draw_msg") + b"\xEA" * 18)
 
-    _write(rom, LOGO_OFFSET, (DATA_DIR / "ap_logo.bin").read_bytes())
-    _write(rom, LOGO_PALETTE_OFFSET, (DATA_DIR / "ap_logo_palette.bin").read_bytes())
+    _write(rom, LOGO_OFFSET, _data("ap_logo.bin"))
+    _write(rom, LOGO_PALETTE_OFFSET, _data("ap_logo_palette.bin"))
     logo = file_to_snes(LOGO_OFFSET)
     palette = file_to_snes(LOGO_PALETTE_OFFSET)
     # gfx source (3), palette source (3), held pose $0014 (32x32 over the head)
