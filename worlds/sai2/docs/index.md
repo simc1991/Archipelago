@@ -380,13 +380,8 @@ target area is free (`0xFF`).
 
 | Script | Purpose |
 |---|---|
-| `tools/analyze_rom_locations.py` | Classifies every `Locations.py` address (chest/event/technique) in a ROM. |
-| `tools/generate_standard_chest_table.py` | Prints the standard chest memory table from the vanilla ROM. |
-| `tools/sai2_check_monitor.lua` | BizHawk read-only monitor for the 51 vanilla chest flags. |
-| `tools/sai2_debug.lua` | BizHawk debug helper for testing without a full playthrough (see [§13](#13-testing)). |
 | `tools/fill_stress.py` | Generates many seeds and reports fill failures: `fill_stress.py [count] [first_seed] [players]`. |
-| `tools/build_test_rom.py`, `tools/patch_seed_rom.py` | Early prototypes. `patch_seed_rom.py` uses an old API signature. |
-| `tools/inspect_sai2_classes.py` | Dumps sai2_rando class sources. |
+| `tools/sai2_debug.lua` | BizHawk debug helper for testing without a full playthrough (see [§13](#13-testing)). |
 | `tools/disasm65816.py` | 65816 disassembler used to reverse engineer the item routines (see [§10.1](#101-how-a-vanilla-chest-works-reverse-engineering)). |
 | `tools/make_ap_logo.py` | Rebuilds `data/ap_logo*.bin` from `data/icon.png`. |
 
