@@ -80,4 +80,5 @@ It also logs every change to `$D3` and `$10`.
 - Remote chests get sink item `$1C10 + k` (message `YOU SENT / <item> / TO <player>`), remote
   events get message code `$40 + k` via `patch_event_check_flag`. Never write a cross-game item
   id to SAI2 item memory.
-- `v14.2 - Fonctionnel/` is a frozen backup — never edit it.
+- The v14 backups were removed from the tree; the frozen v14.2 code is still
+  reachable in git history (commit `bc9af6e4`).

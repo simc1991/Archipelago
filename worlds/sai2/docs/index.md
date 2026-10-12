@@ -45,8 +45,7 @@ how the ROM gets patched, and how the BizHawk client talks to the game.
 | `data/ap_logo.bin`, `data/ap_logo_palette.bin` | AP logo sprite (4bpp) + palette, built by `tools/make_ap_logo.py` from `data/icon.png`. |
 | `tools/` | Standalone research and debug scripts (see [§12](#12-tools)). |
 | `test/` | Unit tests (see [§13](#13-testing)). |
-| `v14 - Fonctionnel mais 2 bug/` | Frozen backup of version 14. Do not edit. |
-| `v14.2 - Fonctionnel/` | Frozen backup of version 14.2 (last solo-only version, with docs/tests/tools). Do not edit. |
+| `v14 - Fonctionnel mais 2 bug/`, `v14.2 - Fonctionnel/` | Removed from the tree; still reachable in git history (commit `bc9af6e4`). |
 
 ## 2. Generation pipeline
 
