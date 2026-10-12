@@ -44,7 +44,9 @@ how the ROM gets patched, and how the clients (BizHawk and SNI) talk to the game
 | `Multiworld.py` | v15 ROM patch: AP item hooks (65816 code), message encoder, receive mailbox constants. |
 | `data/ap_logo.bin`, `data/ap_logo_palette.bin` | AP logo sprite (4bpp) + palette, built by `tools/make_ap_logo.py` from `data/icon.png`. |
 | `tools/` | Standalone research and debug scripts (see [§12](#12-tools)). |
-| `test/` | Unit tests (see [§13](#13-testing)). |
+| `docs/index.md` | This file (developer documentation). |
+| `docs/setup_en.md` | Player-facing setup: install the `.apworld`, generate, host, connect. |
+| `test/` | Removed from the tree; still reachable in git history (commit `bc9af6e4`). |
 | `v14 - Fonctionnel mais 2 bug/`, `v14.2 - Fonctionnel/` | Removed from the tree; still reachable in git history (commit `bc9af6e4`). |
 
 ## 2. Generation pipeline
